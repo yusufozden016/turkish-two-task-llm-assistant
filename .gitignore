@@ -1,0 +1,31 @@
+# Python environments and caches
+**/.venv/
+**/.model-venv/
+**/venv/
+**/env/
+**/__pycache__/
+*.py[cod]
+.env
+
+# Local datasets, models, outputs, and checkpoints
+**/data/
+**/outputs/
+**/reports/
+**/models/*
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.jsonl
+
+# Notebook checkpoints and local-only files
+**/.ipynb_checkpoints/
+SON.ipynb
+llm-chatbot-prototype/
+
+# Editor and operating-system files
+.vscode/
+.idea/
+Thumbs.db
+__MACOSX/

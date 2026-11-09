@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>2-LoRA Turkish Text Assistant</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 24px;
+        display: grid;
+        place-items: center;
+        background: #f3f5f8;
+        color: #20242b;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .chat {
+        width: min(760px, 100%);
+        height: min(820px, calc(100vh - 48px));
+        min-height: 420px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        background: #fff;
+        border: 1px solid #e0e4ea;
+        border-radius: 18px;
+        box-shadow: 0 12px 36px #18243a12;
+      }
+      header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 18px 22px;
+        border-bottom: 1px solid #e9edf2;
+      }
+      .header-actions { display: flex; align-items: center; gap: 12px; }
+      .details-toggle { display: flex; align-items: center; gap: 6px; color: #687386; font-size: 13px; white-space: nowrap; }
+      h1 { margin: 0; font-size: 18px; font-weight: 650; }
+      button {
+        border: 0;
+        border-radius: 10px;
+        padding: 10px 14px;
+        background: #315bd6;
+        color: white;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:disabled { cursor: wait; opacity: 0.65; }
+      button.secondary { background: #edf1f7; color: #293446; }
+      #messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 22px;
+      }
+      .welcome { color: #687386; text-align: center; padding: 48px 12px; }
+      .message { display: flex; margin: 0 0 16px; }
+      .message.user { justify-content: flex-end; }
+      .message.assistant { flex-direction: column; align-items: flex-start; }
+      .bubble {
+        max-width: min(82%, 560px);
+        padding: 12px 15px;
+        border-radius: 15px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .message.user .bubble { background: #315bd6; color: white; border-bottom-right-radius: 5px; }
+      .message.assistant .bubble { background: #f0f3f7; color: #20242b; border-bottom-left-radius: 5px; }
+      .meta { margin-top: 5px; color: #7a8494; font-size: 12px; }
+      form { display: flex; align-items: flex-end; gap: 10px; padding: 16px; border-top: 1px solid #e9edf2; }
+      textarea {
+        flex: 1;
+        resize: vertical;
+        min-height: 46px;
+        max-height: 150px;
+        padding: 12px;
+        border: 1px solid #d9dee7;
+        border-radius: 10px;
+        font: inherit;
+      }
+      textarea:focus { outline: 2px solid #b8c8ff; border-color: #7895ef; }
+      #error { min-height: 0; margin: 0; padding: 0 18px; color: #b42318; }
+      #error:not(:empty) { padding-bottom: 12px; }
+      @media (max-width: 520px) {
+        body { padding: 0; }
+        .chat { height: 100vh; min-height: 100vh; border: 0; border-radius: 0; }
+        header { padding: 14px; }
+        #messages { padding: 16px; }
+        form { padding: 12px; }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="chat">
+      <header>
+        <h1>2-LoRA Turkish Text Assistant</h1>
+        <div class="header-actions">
+          <label class="details-toggle">
+            <input id="detailsToggle" type="checkbox" />
+            Show details
+          </label>
+          <button class="secondary" id="resetButton" type="button">New chat</button>
+        </div>
+      </header>
+      <section id="messages" aria-live="polite">
+        <p class="welcome" id="welcome">Enter a Turkish text and describe the task. The system automatically selects the appropriate model to summarize the text or extract structured information such as people, places, dates, organizations, and events.</p>
+      </section>
+      <form id="chatForm">
+        <textarea id="messageInput" placeholder="Enter a Turkish prompt..." required></textarea>
+        <button id="sendButton" type="submit">Send</button>
+      </form>
+      <p id="error" role="alert"></p>
+    </main>
+    <script>
+      const history = [];
+      const messagesElement = document.querySelector("#messages");
+      const welcomeElement = document.querySelector("#welcome");
+      const form = document.querySelector("#chatForm");
+      const input = document.querySelector("#messageInput");
+      const sendButton = document.querySelector("#sendButton");
+      const resetButton = document.querySelector("#resetButton");
+      const detailsToggle = document.querySelector("#detailsToggle");
+      const errorElement = document.querySelector("#error");
+
+      function addMessage(role, text) {
+        welcomeElement.hidden = true;
+        const row = document.createElement("div");
+        row.className = `message ${role}`;
+        const bubble = document.createElement("div");
+        bubble.className = "bubble";
+        bubble.textContent = text;
+        row.appendChild(bubble);
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        meta.hidden = true;
+        row.appendChild(meta);
+        messagesElement.appendChild(row);
+        messagesElement.scrollTop = messagesElement.scrollHeight;
+        return { bubble, meta };
+      }
+
+      function formatDetails(details) {
+        const taskNames = {
+          summarization: "Summarization",
+          entity_extraction: "Entity extraction",
+        };
+        const task = taskNames[details.class_name] || details.class_name;
+        const confidence = `${(details.confidence * 100).toFixed(1)}%`;
+        const source = details.routing_source === "bert" ? "BERT" : "explicit instruction";
+        const routing = `${details.classification_seconds.toFixed(2)}s routing`;
+        const generation = `${details.generation_seconds.toFixed(2)}s generation`;
+        return `${task} · Source: ${source} · Confidence: ${confidence} · ${routing} · ${generation}`;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const message = input.value.trim();
+        if (!message || sendButton.disabled) return;
+
+        errorElement.textContent = "";
+        addMessage("user", message);
+        const pendingReply = addMessage("assistant", "Preparing a response...");
+        sendButton.disabled = true;
+        sendButton.textContent = "Please wait";
+
+        try {
+          const response = await fetch("/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              message,
+              history,
+              show_details: detailsToggle.checked,
+            }),
+          });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.detail || "The request failed.");
+
+          pendingReply.bubble.textContent = data.reply;
+          if (data.details && detailsToggle.checked) {
+            pendingReply.meta.textContent = formatDetails(data.details);
+            pendingReply.meta.hidden = false;
+          }
+          history.push(
+            { role: "user", content: message },
+            { role: "assistant", content: data.reply },
+          );
+          input.value = "";
+          input.focus();
+        } catch (error) {
+          pendingReply.bubble.textContent = "Could not retrieve a response.";
+          errorElement.textContent = `Error: ${error.message}`;
+        } finally {
+          sendButton.disabled = false;
+          sendButton.textContent = "Send";
+        }
+      });
+
+      resetButton.addEventListener("click", () => {
+        history.length = 0;
+        messagesElement.replaceChildren(welcomeElement);
+        welcomeElement.hidden = false;
+        errorElement.textContent = "";
+        input.value = "";
+        input.focus();
+      });
+    </script>
+  </body>
+</html>
